@@ -2,6 +2,8 @@
 
 namespace App\Controller;
 
+use Cake\Network\Exception\BadRequestException;
+
 class SentencesController extends AppController {
 
     public function initialize() {
@@ -12,6 +14,25 @@ class SentencesController extends AppController {
         $this->loadModel('Places');
         $this->loadModel('Sentences');
         $this->loadModel('Votes');
+    }
+
+    public function add($key = "") {
+        $ids = explode('-', $key);
+
+        if(count($ids) != 4) {
+            throw new BadRequestException();
+            return;
+        }
+        $sentence = $this->Sentences->newEntity([
+            'adjective_id' => $ids[0],
+            'noun_id' => $ids[1],
+            'verb_id' => $ids[2],
+            'place_id' => $ids[3]
+        ]);
+
+        $this->Sentences->save($sentence);
+        $this->set('data', $sentence);
+        $this->set('_serialize', ['data']);
     }
 
     public function generate() {
@@ -28,40 +49,31 @@ class SentencesController extends AppController {
             ->order('rand()')
             ->first();
 
-        $result = "$adjective->word $noun->word $verb->word $place->word";
+        $sentence = "$adjective->word $noun->word $verb->word $place->word";
+        $key = "$adjective->id-$noun->id-$verb->id-$place->id";
 
-        $sentence = $this->Sentences->newEntity([
-            'adjective_id' => $adjective->id,
-            'noun_id' => $noun->id,
-            'verb_id' => $verb->id,
-            'place_id' => $place->id
-        ]);
-
-        $this->Sentences->save($sentence);
-
-        $this->set("sentence", $result);
-        $this->set("id", $sentence->id);
+        $this->set("sentence", $sentence);
+        $this->set("key", $key);
     }
 
-    public function vote($id = 0) {
+    public function vote($vote = 'up',$id = 0) {
+        $vote == 'down' ? $vote = -1 : $vote = 1;
         $vote = $this->Votes->newEntity([
-            'sentence_id' => $id
+            'sentence_id' => $id,
+            'vote' => $vote
         ]);
 
         $this->Votes->save($vote);
         $this->set('saved', $vote);
     }
 
-    public function show() {
+    public function show($order = 'new') {
+        $order == 'new' ? $order = ['Sentences.id' => 'DESC'] : $order = ['Sentences.up_votes_count' => 'DESC'];
         $sentences = $this->Sentences
             ->find()
             ->contain(['Adjectives', 'Nouns', 'Verbs', 'Places'])
-            ->contain(['Votes' => function($q) {
-                return $q->select([
-                    'Votes.sentence_id',
-                    'count' => $q->func()->count('Votes.sentence_id')
-                ])->group(['Votes.sentence_id']);
-            }])
+            ->order($order)
+            ->limit(100)
             ->toArray();
 
         $result = [];
@@ -70,7 +82,8 @@ class SentencesController extends AppController {
             $result[] = [
                 'id' => $sentence->id,
                 'sentence' => $sentence->adjective->word.' '.$sentence->noun->word.' '.$sentence->verb->word.' '.$sentence->place->word,
-                'votes' => isset($sentence->votes[0]->count) ? $sentence->votes[0]->count : 0
+                'up_votes' => $sentence->up_votes_count,
+                'down_votes' => $sentence->down_votes_count
             ];
         }
 
